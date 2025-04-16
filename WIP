@@ -25,14 +25,160 @@ local aimbotState = {
     dynamicColor = false,
     showFov = true,
     enabled = false,
+    autoLock = false,
+    teamCheck = true,
+    locking = false,
+    currentTarget = nil,
+    lockConfirmed = false,
     settingsInitialized = false,
-    settingsObjects = {}, -- To store GUI objects for hiding
+    settingsObjects = {}
 }
 
--- Only connect input listeners once
 local holdingKey = false
 local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
 
+Com:CreateSwitch("Aimbot", function(enabled)
+    aimbotState.enabled = enabled
+
+    -- Create FOV Circle once
+    if not aimbotState.circle then
+        local circle = Drawing.new("Circle")
+        circle.Thickness = 1.5
+        circle.Transparency = 1
+        circle.Filled = false
+        circle.Color = Color3.new(1, 1, 1)
+        circle.Radius = aimbotState.radius
+        circle.Visible = false
+        aimbotState.circle = circle
+
+        -- FOV follow mouse
+        RunService.RenderStepped:Connect(function()
+            aimbotState.circle.Position = UserInputService:GetMouseLocation()
+            aimbotState.circle.Radius = aimbotState.radius
+            aimbotState.circle.Visible = aimbotState.enabled and aimbotState.showFov
+        end)
+
+        -- Aimbot tracking
+        RunService.RenderStepped:Connect(function()
+            if not aimbotState.enabled then return end
+
+            local mousePos = UserInputService:GetMouseLocation()
+            local closest = nil
+            local shortest = math.huge
+
+            for _, player in pairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") then
+                    if aimbotState.teamCheck and player.Team == LocalPlayer.Team then continue end
+                    local head = player.Character.Head
+                    local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
+                    local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
+                    if onScreen and dist < shortest and dist < aimbotState.radius then
+                        shortest = dist
+                        closest = head
+                    end
+                end
+            end
+
+            if aimbotState.autoLock then
+                if closest and not aimbotState.locking and not aimbotState.lockConfirmed then
+                    -- Animate toward target ONCE
+                    aimbotState.locking = true
+                    aimbotState.currentTarget = closest
+
+                    coroutine.wrap(function()
+                        local duration = 0.2
+                        local step = 0.05
+                        for i = 0, 1, step / duration do
+                            if not aimbotState.autoLock then break end
+                            local goal = CFrame.new(Camera.CFrame.Position, aimbotState.currentTarget.Position)
+                            Camera.CFrame = Camera.CFrame:Lerp(goal, i)
+                            task.wait(step)
+                        end
+                        aimbotState.locking = false
+                        aimbotState.lockConfirmed = true
+                    end)()
+                end
+
+                -- After animation, hard lock
+                if aimbotState.lockConfirmed and aimbotState.currentTarget and aimbotState.currentTarget.Parent then
+                    Camera.CFrame = CFrame.new(Camera.CFrame.Position, aimbotState.currentTarget.Position)
+                end
+
+                -- Lost target
+                if not closest then
+                    aimbotState.currentTarget = nil
+                    aimbotState.lockConfirmed = false
+                    aimbotState.locking = false
+                end
+
+                if aimbotState.dynamicColor then
+                    aimbotState.circle.Color = closest and Color3.new(1, 0, 0) or Color3.new(1, 1, 1)
+                end
+            elseif holdingKey and closest then
+                -- Manual aiming
+                Camera.CFrame = CFrame.new(Camera.CFrame.Position, closest.Position)
+                if aimbotState.dynamicColor then
+                    aimbotState.circle.Color = Color3.new(1, 0, 0)
+                end
+            else
+                if aimbotState.dynamicColor then
+                    aimbotState.circle.Color = Color3.new(1, 1, 1)
+                end
+            end
+        end)
+    end
+
+    -- GUI Settings
+    if not aimbotState.settingsInitialized then
+        aimbotState.settingsInitialized = true
+
+        table.insert(aimbotState.settingsObjects, Com:CreateSlider("FOV Radius", function(val)
+            aimbotState.radius = val
+        end, 50, 1000, nil, true, aimbotState.radius))
+
+        table.insert(aimbotState.settingsObjects, Com:CreateSwitch("Dynamic Color", function(toggle)
+            aimbotState.dynamicColor = toggle
+        end))
+
+        table.insert(aimbotState.settingsObjects, Com:CreateSwitch("Show FOV Circle", function(toggle)
+            aimbotState.showFov = toggle
+            if aimbotState.circle then
+                aimbotState.circle.Visible = toggle and aimbotState.enabled
+            end
+        end))
+
+        table.insert(aimbotState.settingsObjects, Com:CreateSwitch("Auto-Lock", function(toggle)
+            aimbotState.autoLock = toggle
+            aimbotState.lockConfirmed = false
+            aimbotState.currentTarget = nil
+            aimbotState.locking = false
+        end))
+
+        table.insert(aimbotState.settingsObjects, Com:CreateSwitch("Team Check", function(toggle)
+            aimbotState.teamCheck = toggle
+        end))
+    end
+
+    -- Show/hide setting UIs
+    for _, setting in pairs(aimbotState.settingsObjects) do
+        if setting and setting.Frame then
+            setting.Frame.Visible = enabled
+        end
+    end
+
+    -- Hide circle if off
+    if aimbotState.circle then
+        aimbotState.circle.Visible = enabled and aimbotState.showFov
+    end
+
+    print("🎯 Aimbot is now " .. (enabled and "Enabled" or "Disabled"))
+end)
+
+-- Manual key for aimbot (optional)
 UserInputService.InputBegan:Connect(function(input, gpe)
     if input.UserInputType == Enum.UserInputType.MouseButton2 and not gpe then
         holdingKey = true
@@ -43,106 +189,6 @@ UserInputService.InputEnded:Connect(function(input, gpe)
     if input.UserInputType == Enum.UserInputType.MouseButton2 and not gpe then
         holdingKey = false
     end
-end)
-
-Com:CreateSwitch("Aimbot", function(enabled)
-    local Players = game:GetService("Players")
-    local RunService = game:GetService("RunService")
-    local UIS = game:GetService("UserInputService")
-    local Camera = workspace.CurrentCamera
-    local LocalPlayer = Players.LocalPlayer
-
-    aimbotState.enabled = enabled
-
-    -- Setup FOV circle once
-    if not aimbotState.circle then
-        local fovCircle = Drawing.new("Circle")
-        fovCircle.Thickness = 1.5
-        fovCircle.Transparency = 1
-        fovCircle.Filled = false
-        fovCircle.Color = Color3.new(1, 1, 1)
-        fovCircle.Radius = aimbotState.radius
-        fovCircle.Visible = false
-        aimbotState.circle = fovCircle
-
-        RunService.RenderStepped:Connect(function()
-            if aimbotState.circle then
-                aimbotState.circle.Position = UIS:GetMouseLocation()
-                aimbotState.circle.Radius = aimbotState.radius
-                aimbotState.circle.Visible = aimbotState.enabled and aimbotState.showFov
-            end
-        end)
-
-        RunService.RenderStepped:Connect(function()
-            if aimbotState.enabled and holdingKey then
-                local mousePos = UIS:GetMouseLocation()
-                local closest = nil
-                local shortest = math.huge
-
-                for _, p in pairs(Players:GetPlayers()) do
-                    if p ~= LocalPlayer and p.Team ~= LocalPlayer.Team and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
-                        local humanoid = p.Character:FindFirstChildOfClass("Humanoid")
-                        if humanoid and humanoid.Health > 0 then
-                            local head = p.Character:FindFirstChild("Head")
-                            if head then
-                                local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
-                                local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
-                                if onScreen and dist < shortest and dist < aimbotState.radius then
-                                    shortest = dist
-                                    closest = head
-                                end
-                            end
-                        end
-                    end
-                end
-
-                if closest then
-                    Camera.CFrame = CFrame.new(Camera.CFrame.Position, closest.Position)
-                    if aimbotState.dynamicColor then
-                        aimbotState.circle.Color = Color3.new(1, 0, 0)
-                    end
-                else
-                    if aimbotState.dynamicColor then
-                        aimbotState.circle.Color = Color3.new(1, 1, 1)
-                    end
-                end
-            end
-        end)
-    end
-
-    -- Create GUI settings (once)
-    if not aimbotState.settingsInitialized then
-        aimbotState.settingsInitialized = true
-
-        table.insert(aimbotState.settingsObjects, Com:CreateSlider("FOV Radius", function(val)
-            aimbotState.radius = val
-        end, 50, 400, nil, true, aimbotState.radius))
-
-        table.insert(aimbotState.settingsObjects, Com:CreateSwitch("Dynamic Color", function(val)
-            aimbotState.dynamicColor = val
-        end))
-
-        table.insert(aimbotState.settingsObjects, Com:CreateSwitch("Show FOV Circle", function(val)
-            aimbotState.showFov = val
-            if aimbotState.circle then
-                aimbotState.circle.Visible = val and aimbotState.enabled
-            end
-        end))
-    end
-
-    -- Show/hide settings
-    for _, setting in pairs(aimbotState.settingsObjects) do
-        if setting and setting.Frame then
-            setting.Frame.Visible = enabled
-        end
-    end
-
-    -- Hide circle if aimbot is off
-    if aimbotState.circle then
-        aimbotState.circle.Visible = enabled and aimbotState.showFov
-    end
-
-    print("🎯 Aimbot is now " .. (enabled and "Enabled" or "Disabled"))
 end)
 
 
