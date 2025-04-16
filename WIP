@@ -1,0 +1,210 @@
+local config = {
+    ["HeaderWidth"] = 250,
+    ["AccentColor"] = Color3.fromRGB(0.0,0,0),
+    ["PrimaryColor"] = Color3.fromRGB(20,20,20),
+    ["SecondaryColor"] = Color3.fromRGB(25,25,25),
+    ["AccentColor"] = Color3.fromRGB(50,50,50),
+    ["TextColor"] =  Color3.new(1,1,1)
+}
+
+local gui = loadstring(game:HttpGet("https://raw.githubusercontent.com/ClownyCoder/Somesource/refs/heads/main/Somesource"))():Init(config,game.CoreGui)
+
+gui:CreateCategory("Exit"):CreateButton("Click to exit the library",function() gui:CleanUp() end)
+
+local lpg = gui:CreateCategory("Local Player")
+
+lpg:CreateSlider("Walk Speed", function(ws) game.Players.LocalPlayer.Character.Humanoid.WalkSpeed = ws end,0,4000,nil,true,game.Players.LocalPlayer.Character.Humanoid.WalkSpeed)
+lpg:CreateSlider("Jump Power", function(jp) game.Players.LocalPlayer.Character.Humanoid.JumpPower = jp end,0,1000,nil,true,game.Players.LocalPlayer.Character.Humanoid.JumpPower)
+lpg:CreateButton("Force Field", function() Instance.new("ForceField",game.Players.LocalPlayer.Character) end)
+
+Com = gui:CreateCategory("Combat")
+
+Com:CreateSection("Aimbot", function()
+    local Players = game:GetService("Players")
+    local RunService = game:GetService("RunService")
+    local UIS = game:GetService("UserInputService")
+    local Camera = workspace.CurrentCamera
+    local LocalPlayer = Players.LocalPlayer
+
+    local aimbotEnabled = true
+    local holdingKey = false
+    local aimKey = Enum.UserInputType.MouseButton2 -- Right mouse button
+    local maxDistance = 1000
+
+    local function getClosestTarget()
+        local closestPlayer = nil
+        local shortestDist = math.huge
+
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+                if humanoid and humanoid.Health > 0 then
+                    local head = player.Character:FindFirstChild("Head")
+                    if head then
+                        local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
+                        local dist = (Vector2.new(pos.X, pos.Y) - UIS:GetMouseLocation()).Magnitude
+                        if onScreen and dist < shortestDist and dist < maxDistance then
+                            shortestDist = dist
+                            closestPlayer = head
+                        end
+                    end
+                end
+            end
+        end
+
+        return closestPlayer
+    end
+
+    RunService.RenderStepped:Connect(function()
+        if aimbotEnabled and holdingKey then
+            local target = getClosestTarget()
+            if target then
+                Camera.CFrame = CFrame.new(Camera.CFrame.Position, target.Position)
+            end
+        end
+    end)
+
+    UIS.InputBegan:Connect(function(input, processed)
+        if input.UserInputType == aimKey then
+            holdingKey = true
+        end
+    end)
+
+    UIS.InputEnded:Connect(function(input, processed)
+        if input.UserInputType == aimKey then
+            holdingKey = false
+        end
+    end)
+
+    print("✅ Aimbot loaded. Hold RIGHT MOUSE to lock onto nearest player's head.")
+end)
+
+Com:CreateSwitch("On/Off")
+Com:CreateSection("hihi")
+
+Bla = gui:CreateCategory("Blatant")
+Ren = gui:CreateCategory("Render")
+Uti = gui:CreateCategory("Utility")
+Wor = gui:CreateCategory("World")
+Exe = gui:CreateCategory("Executor")
+
+Exe:CreateButton("Open Executor", function()
+    local screenGui = Instance.new("ScreenGui", game.CoreGui)
+    screenGui.Name = "ScriptConsole_" .. tostring(math.random(1000, 9999))
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+    local frame = Instance.new("Frame", screenGui)
+    frame.Size = UDim2.new(0, 400, 0, 300)
+    frame.Position = UDim2.new(0.5, -200, 0.5, -150)
+    frame.BackgroundColor3 = Color3.new(0, 0, 0)
+    frame.BorderSizePixel = 0
+    frame.Active = true
+    frame.Draggable = true
+
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 12)
+
+    local topBar = Instance.new("Frame", frame)
+    topBar.Size = UDim2.new(1, 0, 0, 30)
+    topBar.Position = UDim2.new(0, 0, 0, 0)
+    topBar.BackgroundTransparency = 1
+
+    local function createTopButton(name, text, posOffset)
+        local btn = Instance.new("TextButton", topBar)
+        btn.Size = UDim2.new(0, 30, 0, 30)
+        btn.Position = UDim2.new(1, -30 * posOffset, 0, 0)
+        btn.BackgroundColor3 = Color3.new(1, 1, 1)
+        btn.TextColor3 = Color3.new(0, 0, 0)
+        btn.Font = Enum.Font.SourceSansBold
+        btn.TextSize = 18
+        btn.Text = text
+        btn.Name = name
+        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+        return btn
+    end
+
+    local closeBtn = createTopButton("Close", "X", 1)
+    local minimizeBtn = createTopButton("Minimize", "-", 2)
+    local maximizeBtn = createTopButton("Maximize", "▢", 3)
+
+    local textBox = Instance.new("TextBox", frame)
+    textBox.Size = UDim2.new(1, -20, 1, -90)
+    textBox.Position = UDim2.new(0, 10, 0, 40)
+    textBox.BackgroundColor3 = Color3.new(0, 0, 0)
+    textBox.TextColor3 = Color3.new(1, 1, 1)
+    textBox.ClearTextOnFocus = false
+    textBox.MultiLine = true
+    textBox.TextXAlignment = Enum.TextXAlignment.Left
+    textBox.TextYAlignment = Enum.TextYAlignment.Top
+    textBox.Font = Enum.Font.Code
+    textBox.TextSize = 14
+    textBox.Text = ""
+    textBox.PlaceholderText = 'print("Temic!")'
+    Instance.new("UICorner", textBox).CornerRadius = UDim.new(0, 8)
+
+    local executeBtn = Instance.new("TextButton", frame)
+    executeBtn.Size = UDim2.new(0.5, -15, 0, 40)
+    executeBtn.Position = UDim2.new(0, 10, 1, -45)
+    executeBtn.Text = "Execute"
+    executeBtn.BackgroundColor3 = Color3.new(1, 1, 1)
+    executeBtn.TextColor3 = Color3.new(0, 0, 0)
+    executeBtn.Font = Enum.Font.SourceSansBold
+    executeBtn.TextSize = 18
+    Instance.new("UICorner", executeBtn).CornerRadius = UDim.new(0, 8)
+
+    local clearBtn = Instance.new("TextButton", frame)
+    clearBtn.Size = UDim2.new(0.5, -15, 0, 40)
+    clearBtn.Position = UDim2.new(0.5, 5, 1, -45)
+    clearBtn.Text = "Clear"
+    clearBtn.BackgroundColor3 = Color3.new(1, 1, 1)
+    clearBtn.TextColor3 = Color3.new(0, 0, 0)
+    clearBtn.Font = Enum.Font.SourceSansBold
+    clearBtn.TextSize = 18
+    Instance.new("UICorner", clearBtn).CornerRadius = UDim.new(0, 8)
+
+    executeBtn.MouseButton1Click:Connect(function()
+        local success, err = pcall(function()
+            local func = loadstring(textBox.Text)
+            if func then func() end
+        end)
+        if not success then
+            warn("Script error:", err)
+        end
+    end)
+
+    clearBtn.MouseButton1Click:Connect(function()
+        textBox.Text = ""
+    end)
+
+    closeBtn.MouseButton1Click:Connect(function()
+        screenGui:Destroy()
+    end)
+
+    local minimized = false
+    local originalSize = frame.Size
+
+    minimizeBtn.MouseButton1Click:Connect(function()
+        if not minimized then
+            frame.Size = UDim2.new(originalSize.X.Scale, originalSize.X.Offset, 0, 40)
+            textBox.Visible = false
+            executeBtn.Visible = false
+            clearBtn.Visible = false
+            minimized = true
+        end
+    end)
+
+    maximizeBtn.MouseButton1Click:Connect(function()
+        if minimized then
+            frame.Size = originalSize
+            textBox.Visible = true
+            executeBtn.Visible = true
+            clearBtn.Visible = true
+            minimized = false
+        end
+    end)
+end)
+
+-- ✅ Auto re-execute on teleport
+local TeleportService = game:GetService("TeleportService")
+queueonteleport([[
+loadstring(game:HttpGet("https://raw.githubusercontent.com/ClownyCoder/WIP/refs/heads/main/WIP"))()
+]])
