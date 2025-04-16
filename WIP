@@ -13,7 +13,7 @@ gui:CreateCategory("Exit"):CreateButton("Click to exit the library",function() g
 
 local lpg = gui:CreateCategory("Local Player")
 
-lpg:CreateSlider("Walk Speed", function(ws) game.Players.LocalPlayer.Character.Humanoid.WalkSpeed = ws end,0,4000,nil,true,game.Players.LocalPlayer.Character.Humanoid.WalkSpeed)
+lpg:CreateSlider("Walk Speed", function(ws) game.Players.LocalPlayer.Character.Humanoid.WalkSpeed = ws end,0,1000,nil,true,game.Players.LocalPlayer.Character.Humanoid.WalkSpeed)
 lpg:CreateSlider("Jump Power", function(jp) game.Players.LocalPlayer.Character.Humanoid.JumpPower = jp end,0,1000,nil,true,game.Players.LocalPlayer.Character.Humanoid.JumpPower)
 lpg:CreateButton("Force Field", function() Instance.new("ForceField",game.Players.LocalPlayer.Character) end)
 
