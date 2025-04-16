@@ -19,74 +19,265 @@ lpg:CreateButton("Force Field", function() Instance.new("ForceField",game.Player
 
 Com = gui:CreateCategory("Combat")
 
-Com:CreateSection("Aimbot", function()
+local aimbotState = {
+    circle = nil,
+    radius = 120,
+    dynamicColor = false,
+    showFov = true,
+    enabled = false,
+    settingsInitialized = false,
+    settingsObjects = {}, -- To store GUI objects for hiding
+}
+
+-- Only connect input listeners once
+local holdingKey = false
+local UserInputService = game:GetService("UserInputService")
+
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 and not gpe then
+        holdingKey = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input, gpe)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 and not gpe then
+        holdingKey = false
+    end
+end)
+
+Com:CreateSwitch("Aimbot", function(enabled)
     local Players = game:GetService("Players")
     local RunService = game:GetService("RunService")
     local UIS = game:GetService("UserInputService")
     local Camera = workspace.CurrentCamera
     local LocalPlayer = Players.LocalPlayer
 
-    local aimbotEnabled = true
-    local holdingKey = false
-    local aimKey = Enum.UserInputType.MouseButton2 -- Right mouse button
-    local maxDistance = 1000
+    aimbotState.enabled = enabled
 
-    local function getClosestTarget()
-        local closestPlayer = nil
-        local shortestDist = math.huge
+    -- Setup FOV circle once
+    if not aimbotState.circle then
+        local fovCircle = Drawing.new("Circle")
+        fovCircle.Thickness = 1.5
+        fovCircle.Transparency = 1
+        fovCircle.Filled = false
+        fovCircle.Color = Color3.new(1, 1, 1)
+        fovCircle.Radius = aimbotState.radius
+        fovCircle.Visible = false
+        aimbotState.circle = fovCircle
 
-        for _, player in pairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-                if humanoid and humanoid.Health > 0 then
-                    local head = player.Character:FindFirstChild("Head")
+        RunService.RenderStepped:Connect(function()
+            if aimbotState.circle then
+                aimbotState.circle.Position = UIS:GetMouseLocation()
+                aimbotState.circle.Radius = aimbotState.radius
+                aimbotState.circle.Visible = aimbotState.enabled and aimbotState.showFov
+            end
+        end)
+
+        RunService.RenderStepped:Connect(function()
+            if aimbotState.enabled and holdingKey then
+                local mousePos = UIS:GetMouseLocation()
+                local closest = nil
+                local shortest = math.huge
+
+                for _, p in pairs(Players:GetPlayers()) do
+                    if p ~= LocalPlayer and p.Team ~= LocalPlayer.Team and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                        local humanoid = p.Character:FindFirstChildOfClass("Humanoid")
+                        if humanoid and humanoid.Health > 0 then
+                            local head = p.Character:FindFirstChild("Head")
+                            if head then
+                                local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
+                                local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
+                                if onScreen and dist < shortest and dist < aimbotState.radius then
+                                    shortest = dist
+                                    closest = head
+                                end
+                            end
+                        end
+                    end
+                end
+
+                if closest then
+                    Camera.CFrame = CFrame.new(Camera.CFrame.Position, closest.Position)
+                    if aimbotState.dynamicColor then
+                        aimbotState.circle.Color = Color3.new(1, 0, 0)
+                    end
+                else
+                    if aimbotState.dynamicColor then
+                        aimbotState.circle.Color = Color3.new(1, 1, 1)
+                    end
+                end
+            end
+        end)
+    end
+
+    -- Create GUI settings (once)
+    if not aimbotState.settingsInitialized then
+        aimbotState.settingsInitialized = true
+
+        table.insert(aimbotState.settingsObjects, Com:CreateSlider("FOV Radius", function(val)
+            aimbotState.radius = val
+        end, 50, 400, nil, true, aimbotState.radius))
+
+        table.insert(aimbotState.settingsObjects, Com:CreateSwitch("Dynamic Color", function(val)
+            aimbotState.dynamicColor = val
+        end))
+
+        table.insert(aimbotState.settingsObjects, Com:CreateSwitch("Show FOV Circle", function(val)
+            aimbotState.showFov = val
+            if aimbotState.circle then
+                aimbotState.circle.Visible = val and aimbotState.enabled
+            end
+        end))
+    end
+
+    -- Show/hide settings
+    for _, setting in pairs(aimbotState.settingsObjects) do
+        if setting and setting.Frame then
+            setting.Frame.Visible = enabled
+        end
+    end
+
+    -- Hide circle if aimbot is off
+    if aimbotState.circle then
+        aimbotState.circle.Visible = enabled and aimbotState.showFov
+    end
+
+    print("🎯 Aimbot is now " .. (enabled and "Enabled" or "Disabled"))
+end)
+
+
+Bla = gui:CreateCategory("Blatant")
+
+Ren = gui:CreateCategory("Render")
+
+local espState = {
+    enabled = false,
+    settingsInitialized = false,
+    settingsObjects = {},
+    dynamicColor = false,
+    showBoxes = true,
+    thickness = 1.5,
+    boxes = {}
+}
+
+Ren:CreateSwitch("ESP", function(enabled)
+    local Players = game:GetService("Players")
+    local RunService = game:GetService("RunService")
+    local Camera = workspace.CurrentCamera
+    local LocalPlayer = Players.LocalPlayer
+
+    espState.enabled = enabled
+
+    -- Function to clear ESP boxes
+    local function clearESP()
+        for _, box in pairs(espState.boxes) do
+            if box and box.Remove then
+                box:Remove()
+            end
+        end
+        espState.boxes = {}
+    end
+
+    -- Draw ESP box for a player
+    local function drawESP(player)
+        local box = Drawing.new("Square")
+        box.Thickness = espState.thickness
+        box.Filled = false
+        box.Color = Color3.new(1, 1, 1)
+        box.Visible = false
+
+        espState.boxes[player] = box
+    end
+
+    -- Remove box for a player
+    local function removeESP(player)
+        if espState.boxes[player] then
+            espState.boxes[player]:Remove()
+            espState.boxes[player] = nil
+        end
+    end
+
+    -- ESP render logic
+    if enabled then
+        for _, p in pairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer and p.Team ~= LocalPlayer.Team and not espState.boxes[p] then
+                drawESP(p)
+            end
+        end
+
+        Players.PlayerAdded:Connect(function(p)
+            if p ~= LocalPlayer and p.Team ~= LocalPlayer.Team then
+                drawESP(p)
+            end
+        end)
+
+        Players.PlayerRemoving:Connect(function(p)
+            removeESP(p)
+        end)
+
+        RunService.RenderStepped:Connect(function()
+            for _, p in pairs(Players:GetPlayers()) do
+                if espState.boxes[p] and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                    local hrp = p.Character.HumanoidRootPart
+                    local head = p.Character:FindFirstChild("Head")
+
                     if head then
-                        local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
-                        local dist = (Vector2.new(pos.X, pos.Y) - UIS:GetMouseLocation()).Magnitude
-                        if onScreen and dist < shortestDist and dist < maxDistance then
-                            shortestDist = dist
-                            closestPlayer = head
+                        local screenPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+                        if onScreen and espState.showBoxes then
+                            local scale = 3
+                            local box = espState.boxes[p]
+                            box.Size = Vector2.new(35, 50) / (hrp.Position - Camera.CFrame.Position).Magnitude * scale
+                            box.Position = Vector2.new(screenPos.X - box.Size.X/2, screenPos.Y - box.Size.Y/1.5)
+                            box.Visible = true
+                            if espState.dynamicColor then
+                                box.Color = Color3.new(1, 0, 0)
+                            else
+                                box.Color = Color3.new(1, 1, 1)
+                            end
+                            box.Thickness = espState.thickness
+                        else
+                            espState.boxes[p].Visible = false
                         end
                     end
                 end
             end
-        end
-
-        return closestPlayer
+        end)
+    else
+        clearESP()
     end
 
-    RunService.RenderStepped:Connect(function()
-        if aimbotEnabled and holdingKey then
-            local target = getClosestTarget()
-            if target then
-                Camera.CFrame = CFrame.new(Camera.CFrame.Position, target.Position)
-            end
-        end
-    end)
+    -- Show/hide ESP settings in GUI
+    if not espState.settingsInitialized then
+        espState.settingsInitialized = true
 
-    UIS.InputBegan:Connect(function(input, processed)
-        if input.UserInputType == aimKey then
-            holdingKey = true
-        end
-    end)
+        table.insert(espState.settingsObjects, Ren:CreateSlider("Box Thickness", function(val)
+            espState.thickness = val
+        end, 1, 5, nil, false, espState.thickness))
 
-    UIS.InputEnded:Connect(function(input, processed)
-        if input.UserInputType == aimKey then
-            holdingKey = false
-        end
-    end)
+        table.insert(espState.settingsObjects, Ren:CreateSwitch("Dynamic Color", function(toggle)
+            espState.dynamicColor = toggle
+        end))
 
-    print("✅ Aimbot loaded. Hold RIGHT MOUSE to lock onto nearest player's head.")
+        table.insert(espState.settingsObjects, Ren:CreateSwitch("Show Boxes", function(toggle)
+            espState.showBoxes = toggle
+        end))
+    end
+
+    for _, setting in pairs(espState.settingsObjects) do
+        if setting and setting.Frame then
+            setting.Frame.Visible = enabled
+        end
+    end
+
+    print("👀 ESP is now " .. (enabled and "enabled" or "disabled"))
 end)
 
-Com:CreateSwitch("On/Off")
-Com:CreateSection("hihi")
-
-Bla = gui:CreateCategory("Blatant")
-Ren = gui:CreateCategory("Render")
 Uti = gui:CreateCategory("Utility")
+
 Wor = gui:CreateCategory("World")
+
 Exe = gui:CreateCategory("Executor")
+
 
 Exe:CreateButton("Open Executor", function()
     local screenGui = Instance.new("ScreenGui", game.CoreGui)
