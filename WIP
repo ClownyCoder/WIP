@@ -23,13 +23,22 @@ local aimbotState = {
     circle = nil,
     radius = 120,
     dynamicColor = false,
-    showFov = true,
+    showFov = false,
     enabled = false,
     autoLock = false,
-    teamCheck = true,
+    teamCheck = false,
     locking = false,
     currentTarget = nil,
     lockConfirmed = false,
+    settingsInitialized = false,
+    settingsObjects = {}
+}
+
+local silentAimState = {
+    enabled = false,
+    hitChance = 100,
+    targetPart = "Head",
+    visibleCheck = false,
     settingsInitialized = false,
     settingsObjects = {}
 }
@@ -41,28 +50,75 @@ local RunService = game:GetService("RunService")
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
-Com:CreateSwitch("Aimbot", function(enabled)
-    aimbotState.enabled = enabled
-
-    -- Create FOV Circle once
+-- Shared FOV Circle initialization
+local function initFOVCircle()
     if not aimbotState.circle then
-        local circle = Drawing.new("Circle")
-        circle.Thickness = 1.5
-        circle.Transparency = 1
-        circle.Filled = false
-        circle.Color = Color3.new(1, 1, 1)
-        circle.Radius = aimbotState.radius
-        circle.Visible = false
-        aimbotState.circle = circle
+        aimbotState.circle = Drawing.new("Circle")
+        aimbotState.circle.Thickness = 1.5
+        aimbotState.circle.Transparency = 1
+        aimbotState.circle.Filled = false
+        aimbotState.circle.Color = Color3.new(1, 1, 1)
+        aimbotState.circle.Radius = aimbotState.radius
+        aimbotState.circle.Visible = false
 
-        -- FOV follow mouse
         RunService.RenderStepped:Connect(function()
             aimbotState.circle.Position = UserInputService:GetMouseLocation()
             aimbotState.circle.Radius = aimbotState.radius
-            aimbotState.circle.Visible = aimbotState.enabled and aimbotState.showFov
-        end)
+            aimbotState.circle.Visible = (aimbotState.enabled or silentAimState.enabled) and aimbotState.showFov
+            
+            if aimbotState.dynamicColor then
+                local mousePos = UserInputService:GetMouseLocation()
+                local closest = nil
+                local shortest = math.huge
 
-        -- Aimbot tracking
+                for _, player in pairs(Players:GetPlayers()) do
+                    if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") then
+                        if aimbotState.teamCheck and player.Team == LocalPlayer.Team then continue end
+                        local head = player.Character.Head
+                        local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
+                        if onScreen then
+                            local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
+                            if dist < shortest and dist < aimbotState.radius then
+                                shortest = dist
+                                closest = head
+                            end
+                        end
+                    end
+                end
+                aimbotState.circle.Color = closest and Color3.new(1, 0, 0) or Color3.new(1, 1, 1)
+            end
+        end)
+    end
+end
+
+-- Aimbot Switch
+Com:CreateSwitch("Aimbot", function(enabled)
+    aimbotState.enabled = enabled
+    initFOVCircle()
+
+    -- Auto-lock toggle with Q key
+    UserInputService.InputBegan:Connect(function(input, gpe)
+        if input.KeyCode == Enum.KeyCode.Q and not gpe then
+            aimbotState.autoLock = not aimbotState.autoLock
+            if not aimbotState.autoLock then
+                aimbotState.lockConfirmed = false
+                aimbotState.currentTarget = nil
+                aimbotState.locking = false
+            end
+            pcall(function()
+                game.StarterGui:SetCore("SendNotification", {
+                    Title = "Auto-Lock",
+                    Text = "Auto-Lock is now " .. (aimbotState.autoLock and "ON" or "OFF"),
+                    Duration = 2
+                })
+            end)
+            print("[Aimbot] Auto-Lock toggled to", aimbotState.autoLock)
+        end
+    end)
+
+    -- Aimbot tracking
+    if not aimbotState.trackingConnected then
+        aimbotState.trackingConnected = true
         RunService.RenderStepped:Connect(function()
             if not aimbotState.enabled then return end
 
@@ -75,17 +131,18 @@ Com:CreateSwitch("Aimbot", function(enabled)
                     if aimbotState.teamCheck and player.Team == LocalPlayer.Team then continue end
                     local head = player.Character.Head
                     local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
-                    local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
-                    if onScreen and dist < shortest and dist < aimbotState.radius then
-                        shortest = dist
-                        closest = head
+                    if onScreen then
+                        local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
+                        if dist < shortest and dist < aimbotState.radius then
+                            shortest = dist
+                            closest = head
+                        end
                     end
                 end
             end
 
             if aimbotState.autoLock then
                 if closest and not aimbotState.locking and not aimbotState.lockConfirmed then
-                    -- Animate toward target ONCE
                     aimbotState.locking = true
                     aimbotState.currentTarget = closest
 
@@ -103,31 +160,17 @@ Com:CreateSwitch("Aimbot", function(enabled)
                     end)()
                 end
 
-                -- After animation, hard lock
                 if aimbotState.lockConfirmed and aimbotState.currentTarget and aimbotState.currentTarget.Parent then
                     Camera.CFrame = CFrame.new(Camera.CFrame.Position, aimbotState.currentTarget.Position)
                 end
 
-                -- Lost target
                 if not closest then
                     aimbotState.currentTarget = nil
                     aimbotState.lockConfirmed = false
                     aimbotState.locking = false
                 end
-
-                if aimbotState.dynamicColor then
-                    aimbotState.circle.Color = closest and Color3.new(1, 0, 0) or Color3.new(1, 1, 1)
-                end
             elseif holdingKey and closest then
-                -- Manual aiming
                 Camera.CFrame = CFrame.new(Camera.CFrame.Position, closest.Position)
-                if aimbotState.dynamicColor then
-                    aimbotState.circle.Color = Color3.new(1, 0, 0)
-                end
-            else
-                if aimbotState.dynamicColor then
-                    aimbotState.circle.Color = Color3.new(1, 1, 1)
-                end
             end
         end)
     end
@@ -136,6 +179,7 @@ Com:CreateSwitch("Aimbot", function(enabled)
     if not aimbotState.settingsInitialized then
         aimbotState.settingsInitialized = true
 
+        -- Shared FOV settings
         table.insert(aimbotState.settingsObjects, Com:CreateSlider("FOV Radius", function(val)
             aimbotState.radius = val
         end, 50, 1000, nil, true, aimbotState.radius))
@@ -146,16 +190,11 @@ Com:CreateSwitch("Aimbot", function(enabled)
 
         table.insert(aimbotState.settingsObjects, Com:CreateSwitch("Show FOV Circle", function(toggle)
             aimbotState.showFov = toggle
-            if aimbotState.circle then
-                aimbotState.circle.Visible = toggle and aimbotState.enabled
-            end
         end))
 
+        -- Aimbot-specific settings
         table.insert(aimbotState.settingsObjects, Com:CreateSwitch("Auto-Lock", function(toggle)
             aimbotState.autoLock = toggle
-            aimbotState.lockConfirmed = false
-            aimbotState.currentTarget = nil
-            aimbotState.locking = false
         end))
 
         table.insert(aimbotState.settingsObjects, Com:CreateSwitch("Team Check", function(toggle)
@@ -170,15 +209,112 @@ Com:CreateSwitch("Aimbot", function(enabled)
         end
     end
 
-    -- Hide circle if off
-    if aimbotState.circle then
-        aimbotState.circle.Visible = enabled and aimbotState.showFov
-    end
-
     print("🎯 Aimbot is now " .. (enabled and "Enabled" or "Disabled"))
 end)
 
--- Manual key for aimbot (optional)
+-- Silent Aim Switch
+Com:CreateSwitch("Silent Aim", function(enabled)
+    silentAimState.enabled = enabled
+    initFOVCircle()
+    
+    -- Initialize settings if not done
+    if not silentAimState.settingsInitialized then
+        silentAimState.settingsInitialized = true
+
+        -- Silent Aim specific settings
+        table.insert(silentAimState.settingsObjects, Com:CreateSlider("Hit Chance", function(val)
+            silentAimState.hitChance = val
+        end, 0, 100, "%", true, silentAimState.hitChance))
+
+        table.insert(silentAimState.settingsObjects, Com:CreateDropdown("Target Part", {
+            "Head", "Torso", "Random", "Closest"
+        }, function(option)
+            silentAimState.targetPart = option
+        end, true, "Head"))
+
+        table.insert(silentAimState.settingsObjects, Com:CreateSwitch("Visible Check", function(toggle)
+            silentAimState.visibleCheck = toggle
+        end))
+    end
+
+    -- Show/hide silent aim settings
+    for _, setting in pairs(silentAimState.settingsObjects) do
+        if setting and setting.Frame then
+            setting.Frame.Visible = enabled
+        end
+    end
+
+    print("🎯 Silent Aim is now " .. (enabled and "Enabled" or "Disabled"))
+end)
+
+-- Silent Aim hook
+local oldNamecall
+oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+    if not silentAimState.enabled or checkcaller() then
+        return oldNamecall(self, ...)
+    end
+
+    local method = getnamecallmethod()
+    local args = {...}
+
+    if method == "FindPartOnRay" or method == "FindPartOnRayWithIgnoreList" then
+        if math.random(1, 100) > silentAimState.hitChance then
+            return oldNamecall(self, ...)
+        end
+
+        local mousePos = UserInputService:GetMouseLocation()
+        local closest = nil
+        local closestPos = nil
+        local shortestDist = math.huge
+
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                if aimbotState.teamCheck and player.Team == LocalPlayer.Team then
+                    continue
+                end
+
+                local part = nil
+                if silentAimState.targetPart == "Random" then
+                    local parts = {"Head", "UpperTorso", "HumanoidRootPart"}
+                    part = player.Character:FindFirstChild(parts[math.random(1, #parts)])
+                else
+                    part = player.Character:FindFirstChild(silentAimState.targetPart) or 
+                           player.Character:FindFirstChild("HumanoidRootPart")
+                end
+
+                if part then
+                    if silentAimState.visibleCheck then
+                        local ray = Ray.new(Camera.CFrame.Position, (part.Position - Camera.CFrame.Position).Unit * 1000)
+                        local hit = workspace:FindPartOnRayWithIgnoreList(ray, {LocalPlayer.Character, Camera})
+                        if hit and hit:IsDescendantOf(player.Character) == false then
+                            continue
+                        end
+                    end
+
+                    local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+                    if onScreen then
+                        local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                        if dist < aimbotState.radius and dist < shortestDist then
+                            shortestDist = dist
+                            closest = player
+                            closestPos = part.Position
+                        end
+                    end
+                end
+            end
+        end
+
+        if closest then
+            local origin = args[1].Origin
+            local direction = (closestPos - origin).Unit * 1000
+            args[1] = Ray.new(origin, direction)
+        end
+    end
+
+    return oldNamecall(self, unpack(args))
+end)
+
+-- Manual aim key
 UserInputService.InputBegan:Connect(function(input, gpe)
     if input.UserInputType == Enum.UserInputType.MouseButton2 and not gpe then
         holdingKey = true
@@ -191,6 +327,14 @@ UserInputService.InputEnded:Connect(function(input, gpe)
     end
 end)
 
+-- Cleanup function
+function cleanUpAllESP()
+    if aimbotState.circle then
+        aimbotState.circle:Remove()
+        aimbotState.circle = nil
+    end
+end
+
 
 Bla = gui:CreateCategory("Blatant")
 
@@ -198,125 +342,469 @@ Ren = gui:CreateCategory("Render")
 
 local espState = {
     enabled = false,
+    
+    -- Tracers
+    tracers = {
+        drawings = {},
+        thickness = 1.5,
+        transparency = 0.5,
+        color = Color3.new(1, 1, 1)
+    },
+    
+    -- Head Dots
+    headDots = {
+        drawings = {},
+        radius = 4,
+        thickness = 1,
+        color = Color3.new(1, 1, 1)
+    },
+    
+    -- Skeletons
+    skeletons = {
+        drawings = {},
+        thickness = 2,
+        color = Color3.new(1, 1, 1)
+    },
+    
+    -- Settings
     settingsInitialized = false,
-    settingsObjects = {},
-    dynamicColor = false,
-    showBoxes = true,
-    thickness = 1.5,
-    boxes = {}
+    settingsObjects = {}
 }
 
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
 Ren:CreateSwitch("ESP", function(enabled)
-    local Players = game:GetService("Players")
-    local RunService = game:GetService("RunService")
-    local Camera = workspace.CurrentCamera
-    local LocalPlayer = Players.LocalPlayer
-
     espState.enabled = enabled
-
-    -- Function to clear ESP boxes
-    local function clearESP()
-        for _, box in pairs(espState.boxes) do
-            if box and box.Remove then
-                box:Remove()
+    
+    -- Initialize systems if not already done
+    if not espState.initialized then
+        espState.initialized = true
+        initTracers()
+        initHeadDots()
+        initSkeletons()
+    end
+    
+    -- Show/hide setting UIs
+    if espState.settingsInitialized then
+        for _, setting in pairs(espState.settingsObjects) do
+            if setting and setting.Frame then
+                setting.Frame.Visible = enabled
             end
         end
-        espState.boxes = {}
     end
-
-    -- Draw ESP box for a player
-    local function drawESP(player)
-        local box = Drawing.new("Square")
-        box.Thickness = espState.thickness
-        box.Filled = false
-        box.Color = Color3.new(1, 1, 1)
-        box.Visible = false
-
-        espState.boxes[player] = box
-    end
-
-    -- Remove box for a player
-    local function removeESP(player)
-        if espState.boxes[player] then
-            espState.boxes[player]:Remove()
-            espState.boxes[player] = nil
-        end
-    end
-
-    -- ESP render logic
-    if enabled then
-        for _, p in pairs(Players:GetPlayers()) do
-            if p ~= LocalPlayer and p.Team ~= LocalPlayer.Team and not espState.boxes[p] then
-                drawESP(p)
+    
+    -- Initialize settings if not done
+    if not espState.settingsInitialized then
+        espState.settingsInitialized = true
+        
+        -- Tracer Settings
+        table.insert(espState.settingsObjects, Ren:CreateSwitch("Tracers", function(toggle)
+            espState.tracers.enabled = toggle
+            if not toggle then
+                cleanUpTracers()
             end
-        end
-
-        Players.PlayerAdded:Connect(function(p)
-            if p ~= LocalPlayer and p.Team ~= LocalPlayer.Team then
-                drawESP(p)
+        end, false))
+        
+        table.insert(espState.settingsObjects, Ren:CreateSlider("Tracer Thickness", function(val)
+            espState.tracers.thickness = val
+            for _, line in pairs(espState.tracers.drawings) do
+                if line then line.Thickness = val end
             end
-        end)
-
-        Players.PlayerRemoving:Connect(function(p)
-            removeESP(p)
-        end)
-
-        RunService.RenderStepped:Connect(function()
-            for _, p in pairs(Players:GetPlayers()) do
-                if espState.boxes[p] and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
-                    local hrp = p.Character.HumanoidRootPart
-                    local head = p.Character:FindFirstChild("Head")
-
-                    if head then
-                        local screenPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
-                        if onScreen and espState.showBoxes then
-                            local scale = 3
-                            local box = espState.boxes[p]
-                            box.Size = Vector2.new(35, 50) / (hrp.Position - Camera.CFrame.Position).Magnitude * scale
-                            box.Position = Vector2.new(screenPos.X - box.Size.X/2, screenPos.Y - box.Size.Y/1.5)
-                            box.Visible = true
-                            if espState.dynamicColor then
-                                box.Color = Color3.new(1, 0, 0)
-                            else
-                                box.Color = Color3.new(1, 1, 1)
-                            end
-                            box.Thickness = espState.thickness
-                        else
-                            espState.boxes[p].Visible = false
-                        end
+        end, 0.5, 5, nil, true, espState.tracers.thickness))
+        
+        -- Head Dot Settings
+        table.insert(espState.settingsObjects, Ren:CreateSwitch("Head Dots", function(toggle)
+            espState.headDots.enabled = toggle
+            if not toggle then
+                cleanUpHeadDots()
+            end
+        end, false))
+        
+        table.insert(espState.settingsObjects, Ren:CreateSlider("Head Dot Radius", function(val)
+            espState.headDots.radius = val
+            for _, dot in pairs(espState.headDots.drawings) do
+                if dot then dot.Radius = val end
+            end
+        end, 1, 10, nil, true, espState.headDots.radius))
+        
+        -- Skeleton Settings
+        table.insert(espState.settingsObjects, Ren:CreateSwitch("Skeletons", function(toggle)
+            espState.skeletons.enabled = toggle
+            if not toggle then
+                cleanUpSkeletons()
+            end
+        end, false))
+        
+        table.insert(espState.settingsObjects, Ren:CreateSlider("Skeleton Thickness", function(val)
+            espState.skeletons.thickness = val
+            for _, skeleton in pairs(espState.skeletons.drawings) do
+                if skeleton then
+                    for _, line in pairs(skeleton) do
+                        if line then line.Thickness = val end
                     end
                 end
             end
-        end)
-    else
-        clearESP()
+        end, 0.5, 5, nil, true, espState.skeletons.thickness))
     end
-
-    -- Show/hide ESP settings in GUI
-    if not espState.settingsInitialized then
-        espState.settingsInitialized = true
-
-        table.insert(espState.settingsObjects, Ren:CreateSlider("Box Thickness", function(val)
-            espState.thickness = val
-        end, 1, 5, nil, false, espState.thickness))
-
-        table.insert(espState.settingsObjects, Ren:CreateSwitch("Dynamic Color", function(toggle)
-            espState.dynamicColor = toggle
-        end))
-
-        table.insert(espState.settingsObjects, Ren:CreateSwitch("Show Boxes", function(toggle)
-            espState.showBoxes = toggle
-        end))
+    
+    -- Clean up if disabled
+    if not enabled then
+        cleanUpAllESP()
     end
+    
+    print("👁️ ESP is now " .. (enabled and "Enabled" or "Disabled"))
+end)
 
-    for _, setting in pairs(espState.settingsObjects) do
-        if setting and setting.Frame then
-            setting.Frame.Visible = enabled
+-- Cleanup Functions
+function cleanUpAllESP()
+    cleanUpTracers()
+    cleanUpHeadDots()
+    cleanUpSkeletons()
+end
+
+function cleanUpTracers()
+    for _, line in pairs(espState.tracers.drawings) do
+        if line and line.Remove then line:Remove() end
+    end
+    espState.tracers.drawings = {}
+end
+
+function cleanUpHeadDots()
+    for _, dot in pairs(espState.headDots.drawings) do
+        if dot and dot.Remove then dot:Remove() end
+    end
+    espState.headDots.drawings = {}
+end
+
+function cleanUpSkeletons()
+    for _, skeleton in pairs(espState.skeletons.drawings) do
+        if skeleton then
+            for _, line in pairs(skeleton) do
+                if line and line.Remove then line:Remove() end
+            end
         end
     end
+    espState.skeletons.drawings = {}
+end
 
-    print("👀 ESP is now " .. (enabled and "enabled" or "disabled"))
+-- Initialization Functions
+function initTracers()
+    RunService.RenderStepped:Connect(function()
+        if not espState.enabled or not espState.tracers.enabled then return end
+        
+        for _, player in pairs(Players:GetPlayers()) do
+            if player == LocalPlayer then continue end
+            local char = player.Character
+            if not char or not char:FindFirstChild("HumanoidRootPart") then continue end
+            
+            local hrp = char.HumanoidRootPart
+            local screenPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+            
+            -- Create line if needed
+            if not espState.tracers.drawings[player] then
+                local line = Drawing.new("Line")
+                line.Thickness = espState.tracers.thickness
+                line.Color = espState.tracers.color
+                line.Transparency = espState.tracers.transparency
+                line.Visible = false
+                espState.tracers.drawings[player] = line
+            end
+            
+            local line = espState.tracers.drawings[player]
+            
+            if onScreen then
+                local from = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                local to = Vector2.new(screenPos.X, screenPos.Y)
+                line.From = from
+                line.To = to
+                line.Visible = true
+            else
+                line.Visible = false
+            end
+        end
+        
+        -- Cleanup disconnected players
+        for p, line in pairs(espState.tracers.drawings) do
+            if not Players:FindFirstChild(p.Name) then
+                line:Remove()
+                espState.tracers.drawings[p] = nil
+            end
+        end
+    end)
+end
+
+function initHeadDots()
+    RunService.RenderStepped:Connect(function()
+        if not espState.enabled or not espState.headDots.enabled then return end
+        
+        for _, player in pairs(Players:GetPlayers()) do
+            if player == LocalPlayer then continue end
+            local char = player.Character
+            if not char or not char:FindFirstChild("Head") then continue end
+            
+            local head = char.Head
+            local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
+            
+            -- Create dot if needed
+            if not espState.headDots.drawings[player] then
+                local dot = Drawing.new("Circle")
+                dot.Radius = espState.headDots.radius
+                dot.Color = espState.headDots.color
+                dot.Thickness = espState.headDots.thickness
+                dot.Filled = true
+                dot.Transparency = 1
+                dot.Visible = false
+                espState.headDots.drawings[player] = dot
+            end
+            
+            local dot = espState.headDots.drawings[player]
+            
+            if onScreen then
+                dot.Position = Vector2.new(screenPos.X, screenPos.Y)
+                dot.Visible = true
+            else
+                dot.Visible = false
+            end
+        end
+        
+        -- Cleanup disconnected players
+        for p, dot in pairs(espState.headDots.drawings) do
+            if not Players:FindFirstChild(p.Name) then
+                dot:Remove()
+                espState.headDots.drawings[p] = nil
+            end
+        end
+    end)
+end
+
+function initSkeletons()
+    RunService.RenderStepped:Connect(function()
+        if not espState.enabled or not espState.skeletons.enabled then return end
+        
+        for _, player in pairs(Players:GetPlayers()) do
+            if player == LocalPlayer then continue end
+            local char = player.Character
+            if not char or not char:FindFirstChild("HumanoidRootPart") then continue end
+            
+            local humanoidRootPart = char.HumanoidRootPart
+            local screenPos, onScreen = Camera:WorldToViewportPoint(humanoidRootPart.Position)
+            
+            -- Create skeleton lines if needed
+            if not espState.skeletons.drawings[player] then
+                espState.skeletons.drawings[player] = {}
+            end
+            
+            local skeleton = espState.skeletons.drawings[player]
+            local isR6 = not char:FindFirstChild("UpperTorso")
+            
+            -- Get all body parts
+            local bodyParts = {}
+            if isR6 then
+                bodyParts = {
+                    Head = char:FindFirstChild("Head"),
+                    Torso = char:FindFirstChild("Torso"),
+                    LeftArm = char:FindFirstChild("Left Arm"),
+                    RightArm = char:FindFirstChild("Right Arm"),
+                    LeftLeg = char:FindFirstChild("Left Leg"),
+                    RightLeg = char:FindFirstChild("Right Leg")
+                }
+            else
+                bodyParts = {
+                    Head = char:FindFirstChild("Head"),
+                    HumanoidRootPart = char:FindFirstChild("HumanoidRootPart"),
+                    LeftFoot = char:FindFirstChild("LeftFoot"),
+                    LeftHand = char:FindFirstChild("LeftHand"),
+                    LeftLowerArm = char:FindFirstChild("LeftLowerArm"),
+                    LeftLowerLeg = char:FindFirstChild("LeftLowerLeg"),
+                    LeftUpperArm = char:FindFirstChild("LeftUpperArm"),
+                    LeftUpperLeg = char:FindFirstChild("LeftUpperLeg"),
+                    LowerTorso = char:FindFirstChild("LowerTorso"),
+                    RightFoot = char:FindFirstChild("RightFoot"),
+                    RightHand = char:FindFirstChild("RightHand"),
+                    RightLowerArm = char:FindFirstChild("RightLowerArm"),
+                    RightLowerLeg = char:FindFirstChild("RightLowerLeg"),
+                    RightUpperArm = char:FindFirstChild("RightUpperArm"),
+                    RightUpperLeg = char:FindFirstChild("RightUpperLeg"),
+                    UpperTorso = char:FindFirstChild("UpperTorso")
+                }
+            end
+            
+            -- Update line positions if the player is on screen
+            if onScreen then
+                local connections = {}
+                
+                if isR6 then
+                    connections = {
+                        {"Head", "Torso"},
+                        {"Torso", "LeftArm"},
+                        {"Torso", "RightArm"},
+                        {"Torso", "LeftLeg"},
+                        {"Torso", "RightLeg"}
+                    }
+                else
+                    connections = {
+                        {"Head", "UpperTorso"},
+                        {"UpperTorso", "LowerTorso"},
+                        {"UpperTorso", "LeftUpperArm"},
+                        {"UpperTorso", "RightUpperArm"},
+                        {"LeftUpperArm", "LeftLowerArm"},
+                        {"RightUpperArm", "RightLowerArm"},
+                        {"LeftLowerArm", "LeftHand"},
+                        {"RightLowerArm", "RightHand"},
+                        {"LowerTorso", "LeftUpperLeg"},
+                        {"LowerTorso", "RightUpperLeg"},
+                        {"LeftUpperLeg", "LeftLowerLeg"},
+                        {"RightUpperLeg", "RightLowerLeg"},
+                        {"LeftLowerLeg", "LeftFoot"},
+                        {"RightLowerLeg", "RightFoot"},
+                        {"HumanoidRootPart", "UpperTorso"}
+                    }
+                end
+                
+                for _, conn in pairs(connections) do
+                    local fromPartName, toPartName = conn[1], conn[2]
+                    if bodyParts[fromPartName] and bodyParts[toPartName] then
+                        local fromPart = bodyParts[fromPartName]
+                        local toPart = bodyParts[toPartName]
+                        
+                        local screenPosFrom = Camera:WorldToViewportPoint(fromPart.Position)
+                        local screenPosTo = Camera:WorldToViewportPoint(toPart.Position)
+                        
+                        if screenPosFrom and screenPosTo then
+                            local connectionId = fromPartName.."_"..toPartName
+                            
+                            if not skeleton[connectionId] then
+                                skeleton[connectionId] = Drawing.new("Line")
+                                skeleton[connectionId].Color = espState.skeletons.color
+                                skeleton[connectionId].Thickness = espState.skeletons.thickness
+                            end
+                            
+                            skeleton[connectionId].From = Vector2.new(screenPosFrom.X, screenPosFrom.Y)
+                            skeleton[connectionId].To = Vector2.new(screenPosTo.X, screenPosTo.Y)
+                            skeleton[connectionId].Visible = true
+                        end
+                    end
+                end
+            else
+                for _, line in pairs(skeleton) do
+                    if line then line.Visible = false end
+                end
+            end
+        end
+        
+        -- Cleanup disconnected players
+        for p, skeleton in pairs(espState.skeletons.drawings) do
+            if not Players:FindFirstChild(p.Name) then
+                for _, line in pairs(skeleton) do
+                    if line then line:Remove() end
+                end
+                espState.skeletons.drawings[p] = nil
+            end
+        end
+    end)
+end
+
+local xrayState = {
+    enabled = false,
+    originalTransparencies = {},
+    connection = nil,
+    transparency = 0.7, -- Adjust this value (0.5 = 50% transparent)
+    wallMaterial = Enum.Material.Plastic -- Change this to target specific materials
+}
+
+-- Function to apply X-ray effect to walls
+local function applyXrayEffect(enabled)
+    if enabled then
+        -- Clear previous data
+        xrayState.originalTransparencies = {}
+        
+        -- Scan through workspace for walls/parts
+        for _, part in ipairs(workspace:GetDescendants()) do
+            if part:IsA("BasePart") then
+                -- Skip players and their accessories
+                local isPlayerPart = part:FindFirstAncestorOfClass("Model") and 
+                                    part:FindFirstAncestorOfClass("Model"):FindFirstChildOfClass("Humanoid")
+                
+                if not isPlayerPart then
+                    -- Store original transparency
+                    xrayState.originalTransparencies[part] = {
+                        transparency = part.Transparency,
+                        localModifier = part.LocalTransparencyModifier
+                    }
+                    
+                    -- Apply X-ray effect
+                    part.Transparency = xrayState.transparency
+                    part.LocalTransparencyModifier = 0 -- Makes it visible through other walls
+                end
+            end
+        end
+    else
+        -- Restore original properties
+        for part, properties in pairs(xrayState.originalTransparencies) do
+            if part and part.Parent then
+                part.Transparency = properties.transparency
+                part.LocalTransparencyModifier = properties.localModifier
+            end
+        end
+        xrayState.originalTransparencies = {}
+    end
+end
+
+-- X-Ray Toggle
+Ren:CreateSwitch("X-Ray Walls", function(enabled)
+    xrayState.enabled = enabled
+    applyXrayEffect(enabled)
+    
+    -- Handle new parts being added
+    if enabled and not xrayState.connection then
+        xrayState.connection = workspace.DescendantAdded:Connect(function(part)
+            if part:IsA("BasePart") then
+                local isPlayerPart = part:FindFirstAncestorOfClass("Model") and 
+                                    part:FindFirstAncestorOfClass("Model"):FindFirstChildOfClass("Humanoid")
+                
+                if not isPlayerPart then
+                    xrayState.originalTransparencies[part] = {
+                        transparency = part.Transparency,
+                        localModifier = part.LocalTransparencyModifier
+                    }
+                    part.Transparency = xrayState.transparency
+                    part.LocalTransparencyModifier = 0
+                end
+            end
+        end)
+    elseif not enabled and xrayState.connection then
+        xrayState.connection:Disconnect()
+        xrayState.connection = nil
+    end
+    
+    print("Wall X-Ray is now " .. (enabled and "Enabled" or "Disabled"))
 end)
+
+-- Add transparency slider for customization
+table.insert(espState.settingsObjects, Ren:CreateSlider("X-Ray Strength", function(value)
+    xrayState.transparency = value/100 -- Convert to 0-1 range
+    if xrayState.enabled then
+        applyXrayEffect(false) -- Reset first
+        applyXrayEffect(true) -- Reapply with new value
+    end
+end, 30, 90, "%", true, 70)) -- 30-90% transparency range, default 70%
+
+-- Add to cleanup function
+function cleanUpAllESP()
+    -- ... existing cleanup code ...
+    
+    -- Clean up X-ray
+    if xrayState.enabled then
+        applyXrayEffect(false)
+    end
+    if xrayState.connection then
+        xrayState.connection:Disconnect()
+        xrayState.connection = nil
+    end
+end
 
 Uti = gui:CreateCategory("Utility")
 
